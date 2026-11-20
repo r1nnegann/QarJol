@@ -1,0 +1,102 @@
+QarJol: a winter campus courier robot (A* + Bayes + MDP)
+All numbers are classroom assumptions; the map is a hypothetical campus.
+
+========================================================================
+PART 1 - A* SEARCH: which route can the robot take?
+========================================================================
+INPUT   6x6 campus grid, 4-connected moves, cost 1 per step,
+        start S=(5, 4), goal G=(0, 3), snow-prone passage P=(2, 5)
+        heuristic h(n) = Manhattan distance to G (admissible)
+
+. . . G . .
+. C . . . .
+. M M M M P
+. . . . . .
+. L L . . .
+. . . . S .
+
+STEPS   A* expansions for the shortcut (node, g, h, f = g + h):
+        (5, 4)  g=0  h=6  f=6 
+        (4, 4)  g=1  h=5  f=6 
+        (3, 4)  g=2  h=4  f=6 
+        (3, 3)  g=3  h=3  f=6 
+        (4, 3)  g=2  h=4  f=6 
+        (5, 3)  g=1  h=5  f=6 
+        (3, 2)  g=4  h=4  f=8 
+        (3, 5)  g=3  h=5  f=8 
+        (2, 5)  g=4  h=4  f=8 
+        (1, 5)  g=5  h=3  f=8 
+        (0, 5)  g=6  h=2  f=8 
+        (0, 4)  g=7  h=1  f=8 
+        (0, 3)  g=8  h=0  f=8 
+
+        A* expanded 13 nodes; uniform-cost search (h=0) expanded 24 for the same length 8.
+
+OUTPUT  shortcut through P (8 steps): (5,4) -> (4,4) -> (3,4) -> (3,5) -> (2,5) -> (1,5) -> (0,5) -> (0,4) -> (0,3)
+. . . G * *
+. C . . . *
+. M M M M P
+. . . . * *
+. L L . * .
+. . . . S .
+
+        if P is blocked, the robot sees it at (3, 5) after 3 steps and A* re-plans without P: total 14 steps
+* * * G . .
+* C . . . .
+* M M M M X
+* * * * * *
+. L L . * .
+. . . . S .
+EXPLAIN A* finds the shortest routes, and their lengths become the rewards of
+        the MDP; the Manhattan heuristic lets it skip useless cells.
+
+========================================================================
+PART 2 - BAYES: is the passage blocked by snow?
+========================================================================
+INPUT   prior P(Blocked) = 0.30 (overnight snow forecast)
+        sensor: P(SNOW|Blocked) = 0.85, P(SNOW|Clear) = 0.15
+        observed reading = CLEAR
+STEPS   P(reading|Blocked) * P(Blocked) = 0.15 * 0.30 = 0.0450
+        P(reading|Clear)   * P(Clear)   = 0.85 * 0.70 = 0.5950
+        P(reading) = 0.0450 + 0.5950 = 0.6400
+OUTPUT  P(Blocked | CLEAR) = 0.0450 / 0.6400 = 0.0703
+EXPLAIN Bayes combines the forecast with a noisy sensor, so the robot neither
+        trusts one reading blindly nor ignores it.
+
+========================================================================
+PART 3 - MDP: Move now or Wait for the snowplow?
+========================================================================
+INPUT   states Clear / Blocked (+ terminal Delivered); actions Move, Wait
+        delivery +20, step -1, stuck penalty -3, wait -1, gamma 0.95
+        Wait transitions: Clear->Blocked 0.10 (new drift), Blocked->Clear 0.50 (snowplow)
+        rewards R(s,a) from the A* route lengths:
+          R(Clear, Move)   = 20 - 8 = +12
+          R(Blocked, Move) = 20 - 14 - 3 = +3
+          R(any, Wait)     = -1
+STEPS   value iteration: V(s) = max_a [R(s,a) + gamma * sum T(s,a,s') V(s')]
+          sweep 0: V(Clear)=0.0000  V(Blocked)=0.0000
+          sweep 1: V(Clear)=12.0000  V(Blocked)=3.0000
+          sweep 2: V(Clear)=12.0000  V(Blocked)=6.1250
+          sweep 3: V(Clear)=12.0000  V(Blocked)=7.6094
+          ... converged after 32 sweeps
+          Q(Clear, .) = Move 12.0000, Wait 10.1105  -> best Move
+          Q(Blocked, .) = Move 3.0000, Wait 8.9524  -> best Wait
+OUTPUT  if the state were known: Clear -> Move, Blocked -> Wait
+        score crossover b ~= 0.2410 (rounded); compare full-precision Q_b
+        below crossover: Move; above: Wait; equal scores: Move
+EXPLAIN The MDP weighs a quick delivery against getting stuck, and counts what
+        can happen while waiting (snowplow or new snow).
+
+========================================================================
+TOGETHER - one winter morning, minute by minute
+========================================================================
+minute 0: prior 0.3000, reading CLEAR -> P(Blocked) 0.0703
+          Q_b: Move 11.367, Wait 10.029  => Move
+RESULT  recommended Move after waiting 0 min; planned shortcut if P is clear (8 steps): (5,4) -> (4,4) -> (3,4) -> (3,5) -> (2,5) -> (1,5) -> (0,5) -> (0,4) -> (0,3)
+        if P is blocked on arrival: fallback route (14 steps)
+. . . G * *
+. C . . . *
+. M M M M P
+. . . . * *
+. L L . * .
+. . . . S .
