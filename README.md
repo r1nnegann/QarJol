@@ -21,11 +21,20 @@ forecast + sensor → Bayes → belief P(Blocked) → weighted action choice
 
 The algorithms serve one goal: A* changes the MDP's travel rewards, Bayes changes the belief used for action selection, and Wait feeds the next Bayesian update. UCS is a search baseline and BFS a test oracle, not additional agent stages.
 
+## Web interface
+
+**Online:** <https://aif.s-madaminov.tech/> · **Local:** `python app.py` opens the same page at `http://127.0.0.1:8765/` (no internet needed).
+
+The page is an interactive view of the same agent. It shows the campus map with the planned shortcut and fallback, an A* expansion player (g, h and f in every expanded cell), the Bayes update for each minute, the value-iteration curve, the belief-weighted Move/Wait scores with the crossover b*, a minute-by-minute recommendation and the 10,000-morning policy comparison. Presets reproduce the console scenarios; sliders change the forecast prior and snowplow speed; SNOW/CLEAR buttons (keys `S`, `C`, `Backspace`) add readings. "Play a random morning" hides the true courtyard state, samples readings from it and reveals it when the robot leaves.
+
+The page does not re-implement the algorithms. `qarjol/web_api.py` returns the agent's results as JSON. Locally, `app.py` (standard-library `http.server`) calls it; online, the page loads Python in the browser with [Pyodide](https://pyodide.org/) and imports the same `qarjol` files. Both paths print the same numbers as `main.py`.
+
 ## Run
 
 **Python 3.9+; standard library only.** Local verification: Windows, Python 3.14.0. Extract the ZIP and open a terminal **inside `QarJol`**.
 
 ```powershell
+python app.py
 python main.py
 python -m unittest discover -s tests -v
 python main.py --evaluate
@@ -134,13 +143,14 @@ After SNOW the belief is 0.7083 and the choice is Wait. Prediction gives the nex
 
 ## Tests
 
-`python -m unittest discover -s tests -v`: **25/25 passed locally** (the original 21 plus four regression tests added after review).
+`python -m unittest discover -s tests -v`: **33/33 passed locally** (the original 21, four regression tests added after review and eight tests for the web layer).
 
 - A* against independent BFS; valid walks, obstacles, unreachable goal and UCS comparison.
 - Bayesian arithmetic, uninformative sensor, belief prediction and invalid inputs.
 - Route-derived rewards, closed-form Bellman solution, normal/blizzard policies and threshold.
 - Four demo decisions, seeded reproducibility and comparison against fixed rules.
 - Review regressions: invalid sensor probabilities, invalid simulation counts, exact-score ties and invalid CLI arguments.
+- Web layer (`tests/test_web.py`): the JSON views reproduce the console numbers (0.7083, 0.0989, b* 0.2410, 13 vs 24 expansions, evaluation rewards), invalid inputs are rejected, random mornings are reproducible, and the local server answers the page, the API and HTTP 400 for bad input.
 
 `test_agent_never_worse_than_fixed_rules` checks only its seeded scenarios; its name is not a universal optimality guarantee.
 
@@ -194,7 +204,7 @@ The scenario extends the delivery-robot idea from Week 1 practice. Future course
 
 ## Code map
 
-`main.py`: console; `campus.py`: grid; `search.py`: routes; `bayes.py`: inference; `mdp.py`: decision model; `agent.py`: integration and simulation. Modules are in `qarjol/`; tests in `tests/`; complete command outputs in `samples/`.
+`main.py`: console; `app.py`: local web server; `web/`: page, styles and drawing code; `web_api.py`: JSON views for the page; `campus.py`: grid; `search.py`: routes; `bayes.py`: inference; `mdp.py`: decision model; `agent.py`: integration and simulation. Modules are in `qarjol/`; tests in `tests/`; complete command outputs in `samples/`.
 
 ## References
 

@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>QarJol · Winter Campus Courier</title>
+<meta name="description" content="QarJol: a winter campus courier robot that combines A* search, Bayesian inference and an MDP to decide whether to move now or wait for the snowplow.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%232a78d6'/%3E%3Cpath d='M16 6v20M7.3 11l17.4 10M7.3 21l17.4-10' stroke='white' stroke-width='2.4' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="tooltip" class="tooltip" role="status" aria-live="polite" hidden></div>
+
+<header class="topbar">
+  <div class="wrap topbar-inner">
+    <a class="brand" href="#top" aria-label="QarJol home">
+      <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8"/><path d="M16 6v20M7.3 11l17.4 10M7.3 21l17.4-10"/></svg>
+      <span class="brand-name">QarJol</span>
+      <span class="brand-sub">Winter campus courier</span>
+    </a>
+    <nav class="topnav" aria-label="Sections">
+      <a href="#demo">Demo</a>
+      <a href="#how">How it decides</a>
+      <a href="#evaluation">Evaluation</a>
+      <a href="#about">About</a>
+    </nav>
+    <div class="top-actions">
+      <span id="engine" class="engine-pill" data-state="loading" title="Where the Python code runs">
+        <span class="dot"></span><span id="engine-text">Starting Python…</span>
+      </span>
+      <button id="theme-toggle" class="icon-btn" type="button" aria-label="Switch light or dark theme" title="Theme">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9z"/></svg>
+      </button>
+    </div>
+  </div>
+</header>
+
+<main id="top">
+  <section class="hero wrap">
+    <p class="eyebrow">AIF1303 AI Fundamentals · Final Project · Topic 02, Mini Campus Delivery Robot</p>
+    <h1>Go now, or wait for the snowplow?</h1>
+    <p class="lead">A courier robot must bring a parcel from the dormitory to the AI Lab. The short way crosses an open courtyard that snow can block, and the only snow sensor is noisy. Three course algorithms work together to make one decision.</p>
+    <ol class="pipeline" aria-label="How the three algorithms connect">
+      <li><span class="step-no">1</span><b>A* search</b><span>plans the shortcut and the fallback. Their lengths become the MDP rewards.</span></li>
+      <li><span class="step-no">2</span><b>Bayes</b><span>turns the forecast and a noisy reading into P(Blocked).</span></li>
+      <li><span class="step-no">3</span><b>MDP</b><span>values Move and Wait. The belief weights them and the robot picks the larger.</span></li>
+    </ol>
+  </section>
+
+  <section id="demo" class="wrap workspace" aria-label="Interactive demo">
+    <aside class="card controls" aria-label="Morning setup">
+      <h2>Morning setup</h2>
+      <div class="field">
+        <span class="label">Presets</span>
+        <div class="presets" id="presets">
+          <button type="button" class="preset" data-prior="0.30" data-plow="0.50" data-readings="SNOW,CLEAR">Normal morning<small>SNOW, then CLEAR</small></button>
+          <button type="button" class="preset" data-prior="0.30" data-plow="0.50" data-readings="CLEAR">Sensor says CLEAR<small>prior 0.30</small></button>
+          <button type="button" class="preset" data-prior="0.05" data-plow="0.50" data-readings="SNOW">Clear forecast<small>prior 0.05, SNOW alert</small></button>
+          <button type="button" class="preset" data-prior="0.30" data-plow="0.10" data-readings="SNOW">Slow snowplow<small>blizzard, SNOW</small></button>
+        </div>
+      </div>
+
+      <div class="field">
+        <label class="label" for="prior">Forecast: prior P(Blocked) <output id="prior-out" for="prior">0.30</output></label>
+        <input id="prior" type="range" min="0" max="1" step="0.01" value="0.30">
+        <span class="hint">How often a morning like this starts with the courtyard drifted shut.</span>
+      </div>
+
+      <div class="field">
+        <label class="label" for="plow">Snowplow: P(Blocked → Clear) per minute <output id="plow-out" for="plow">0.50</output></label>
+        <input id="plow" type="range" min="0" max="1" step="0.01" value="0.50">
+        <span class="hint">Chance the plow clears the courtyard while the robot waits one minute.</span>
+      </div>
+
+      <div class="field">
+        <span class="label">Sensor readings, one per minute</span>
+        <div id="chips" class="chips" aria-live="polite"></div>
+        <div class="btn-row">
+          <button type="button" class="btn reading snow" data-add="SNOW" title="Key S">+ SNOW</button>
+          <button type="button" class="btn reading clear" data-add="CLEAR" title="Key C">+ CLEAR</button>
+          <button type="button" class="btn ghost" id="undo" title="Backspace">Undo</button>
+          <button type="button" class="btn ghost" id="reset">Reset</button>
+        </div>
+        <span class="hint">Keys: <kbd>S</kbd> <kbd>C</kbd> <kbd>Backspace</kbd>. Readings after a Move are not used.</span>
+      </div>
+
+      <div class="field random-field">
+        <span class="label">Hidden truth</span>
+        <button type="button" class="btn primary wide" id="random-btn">Play a random morning</button>
+        <span class="hint">The simulator hides the real courtyard state, draws sensor readings from it and reveals it when the robot leaves.</span>
+      </div>
+    </aside>
+
+    <div class="card map-card">
+      <div class="card-head">
+        <h2>Campus map</h2>
+        <div class="tabs" role="tablist" aria-label="Map view">
+          <button role="tab" type="button" data-view="route" aria-selected="true">Route plan</button>
+          <button role="tab" type="button" data-view="astar" aria-selected="false">A* search</button>
+          <button role="tab" type="button" data-view="random" aria-selected="false" id="tab-random" disabled>Random morning</button>
+        </div>
+      </div>
+      <div class="map-wrap">
+        <svg id="map" role="img" aria-label="6 by 6 campus grid with the planned route"></svg>
+      </div>
+      <div id="map-caption" class="map-caption"></div>
+      <div id="astar-player" class="player" hidden>
+        <button type="button" class="icon-btn" id="astar-play" aria-label="Play A* expansion"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg></button>
+        <input type="range" id="astar-step" min="0" max="13" value="13" aria-label="A* expansion step">
+        <span id="astar-text" class="mono"></span>
+      </div>
+      <div class="legend" id="map-legend"></div>
+    </div>
+
+    <div class="card decision-card" aria-live="polite">
+      <div class="card-head"><h2>Recommendation</h2><span id="decision-minute" class="muted small"></span></div>
+      <div id="decision" class="decision"></div>
+      <div class="belief">
+        <div class="belief-head"><span class="label">Belief P(Blocked) after each reading</span><span id="threshold-text" class="muted small"></span></div>
+        <div id="belief-meter" class="meter"></div>
+      </div>
+      <div class="scores" id="scores"></div>
+      <h3 class="sub">Minute by minute</h3>
+      <ol id="minutes" class="minutes"></ol>
+    </div>
+  </section>
+
+  <section id="how" class="wrap section">
+    <div class="section-head">
+      <h2>How the decision is made</h2>
+      <p class="muted">Each algorithm shows its input, key steps, output and one sentence on its role. The numbers update with the setup above.</p>
+    </div>
+
+    <div class="how-grid">
+      <article class="card algo" id="algo-astar">
+        <header class="algo-head"><span class="badge">1</span><div><h3>A* search: which route?</h3><p class="muted small">Week 2 · informed search</p></div></header>
+        <dl class="io">
+          <dt>Input</dt><dd id="astar-input"></dd>
+          <dt>Key steps</dt><dd>Expand the frontier cell with the smallest <span class="mono">f = g + h</span>, where <span class="mono">g</span> is steps walked and <span class="mono">h</span> the Manhattan distance to G (admissible: it never overestimates).</dd>
+        </dl>
+        <div class="stat-row" id="astar-stats"></div>
+        <details class="table-details">
+          <summary>Expansion order (shortcut search)</summary>
+          <div class="table-scroll"><table class="data" id="astar-table"></table></div>
+        </details>
+        <p class="output"><b>Output.</b> <span id="astar-output"></span></p>
+        <p class="sentence">A* supplies the route and its travel cost, and those costs become the MDP's Move rewards.</p>
+      </article>
+
+      <article class="card algo" id="algo-bayes">
+        <header class="algo-head"><span class="badge">2</span><div><h3>Bayes: is the courtyard blocked?</h3><p class="muted small">Week 6 · probabilistic reasoning</p></div></header>
+        <div class="minute-tabs" id="bayes-tabs" role="tablist" aria-label="Choose a minute"></div>
+        <dl class="io">
+          <dt>Input</dt><dd id="bayes-input"></dd>
+          <dt>Key steps</dt><dd id="bayes-steps" class="mono-block"></dd>
+        </dl>
+        <div id="bayes-bars" class="prob-bars"></div>
+        <p class="output"><b>Output.</b> <span id="bayes-output"></span></p>
+        <p class="sentence">Bayes combines the forecast with a noisy sensor, so the robot neither trusts one reading blindly nor ignores it.</p>
+      </article>
+
+      <article class="card algo algo-wide" id="algo-mdp">
+        <header class="algo-head"><span class="badge">3</span><div><h3>MDP: Move now or Wait?</h3><p class="muted small">Week 5 · sequential decisions, value iteration</p></div></header>
+        <div class="mdp-grid">
+          <div>
+            <dl class="io">
+              <dt>Input</dt><dd>States <b>Clear</b> and <b>Blocked</b> (plus terminal Delivered), actions <b>Move</b> and <b>Wait</b>, discount <span class="mono" id="gamma"></span>.</dd>
+            </dl>
+            <div class="table-scroll"><table class="data compact" id="reward-table"></table></div>
+            <div class="table-scroll"><table class="data compact" id="transition-table"></table></div>
+            <dl class="io">
+              <dt>Key steps</dt><dd><span class="mono">V(s) = max<sub>a</sub> [ R(s,a) + γ Σ T(s,a,s′) V(s′) ]</span>, repeated from V = 0 until it stops changing.</dd>
+            </dl>
+            <div class="table-scroll"><table class="data compact" id="q-table"></table></div>
+          </div>
+          <figure class="chart-fig">
+            <figcaption><b>Value iteration</b><span class="muted small" id="vi-caption"></span></figcaption>
+            <div class="chart" id="chart-vi"></div>
+          </figure>
+          <figure class="chart-fig">
+            <figcaption><b>Belief-weighted scores</b><span class="muted small">Q<sub>b</sub>(a) = (1 − b)·Q(Clear,a) + b·Q(Blocked,a)</span></figcaption>
+            <div class="chart" id="chart-qb"></div>
+          </figure>
+        </div>
+        <p class="output"><b>Output.</b> <span id="mdp-output"></span></p>
+        <p class="sentence">The MDP weighs a quick delivery against getting stuck, and counts what can happen while waiting (snowplow or new snow).</p>
+      </article>
+    </div>
+  </section>
+
+  <section id="evaluation" class="wrap section">
+    <div class="section-head">
+      <h2>Evaluation: does the agent beat simple rules?</h2>
+      <p class="muted">Simulated mornings with a hidden true state, seed 2026. <b>always_move</b> leaves at once, <b>trust_sensor</b> waits on SNOW and moves on CLEAR, <b>agent</b> uses Bayes and the MDP. Every policy moves after 10 waits.</p>
+    </div>
+    <div class="card eval-card">
+      <div class="eval-controls">
+        <label class="label" for="mornings">Mornings per scenario</label>
+        <select id="mornings">
+          <option value="1000">1,000</option>
+          <option value="10000" selected>10,000</option>
+          <option value="50000">50,000</option>
+        </select>
+        <button type="button" class="btn primary" id="eval-btn">Run simulation</button>
+        <span id="eval-status" class="muted small"></span>
+      </div>
+      <div class="chart" id="chart-eval"><p class="empty muted">Run the simulation to compare the three policies. Your current setup is added as a fourth scenario.</p></div>
+      <div class="table-scroll"><table class="data" id="eval-table"></table></div>
+      <p class="muted small">Higher reward is better. Rewards here are undiscounted. "Stuck rate" means the robot met a blocked courtyard and took the fallback, not a failed delivery. The simulator uses the same assumed model as the agent, so it checks the decision logic, not real-world accuracy.</p>
+    </div>
+  </section>
+
+  <section id="about" class="wrap section about">
+    <div class="card">
+      <h2>About this project</h2>
+      <p>QarJol is a classroom simulation. The map is a hypothetical 6×6 campus, and every probability, reward and time is an assumption chosen to make the decision interesting, not a measurement.</p>
+      <div class="about-grid">
+        <div>
+          <h3 class="sub">Run it yourself</h3>
+          <pre class="code"><code>python app.py        # this web interface
+python main.py       # console version
+python -m unittest discover -s tests -v</code></pre>
+          <p class="muted small">Python 3.9+, standard library only. The web page calls the same <span class="mono">qarjol</span> functions as the console; online, they run in the browser through Pyodide.</p>
+        </div>
+        <div>
+          <h3 class="sub">Limitations</h3>
+          <ul class="plain">
+            <li>Probabilities would need real sensor and snow-clearing data.</li>
+            <li>Only one passage can be blocked, and snow does not change during the delivery.</li>
+            <li>Weighting the fully observed MDP's Q values by the belief approximates a POMDP.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="footer">
+  <div class="wrap footer-inner">
+    <span>Madaminov Salmankhoja · AIF1303 AI Fundamentals · QAIRU · 2026</span>
+    <span class="muted" id="engine-footer"></span>
+  </div>
+</footer>
+
+<div id="toast" class="toast" role="alert" hidden></div>
+<script src="app.js"></script>
+</body>
+</html>
